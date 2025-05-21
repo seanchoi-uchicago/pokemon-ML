@@ -108,11 +108,39 @@ class Pokemon:
     def heal(self, amount: int):
         self.current_hp = min(self.hp, self.current_hp + amount)
 
+class Team:
+    def __init__(self, pokemon_list: List[Pokemon]):
+        if len(pokemon_list) != 6:
+            raise ValueError("A team must have exactly 6 Pokemon")
+        self.pokemon = pokemon_list
+        self.active_pokemon_index = 0
+
+    @property
+    def active_pokemon(self) -> Pokemon:
+        return self.pokemon[self.active_pokemon_index]
+
+    def switch_pokemon(self, new_index: int) -> bool:
+        """Switch to a different Pokemon in the team."""
+        if 0 <= new_index < len(self.pokemon):
+            if not self.pokemon[new_index].is_fainted():
+                self.active_pokemon_index = new_index
+                return True
+        return False
+
+    def get_available_switches(self) -> List[int]:
+        """Get indices of Pokemon that can be switched to."""
+        return [i for i, p in enumerate(self.pokemon) if not p.is_fainted() and i != self.active_pokemon_index]
+
+    def is_defeated(self) -> bool:
+        """Check if all Pokemon in the team are fainted."""
+        return all(p.is_fainted() for p in self.pokemon)
+
 class Battle:
-    def __init__(self, player_pokemon: Pokemon, opponent_pokemon: Pokemon):
-        self.player_pokemon = player_pokemon
-        self.opponent_pokemon = opponent_pokemon
+    def __init__(self, player_team: Team, opponent_team: Team):
+        self.player_team = player_team
+        self.opponent_team = opponent_team
         self.turn_count = 0
+        self.last_move_used = None
 
     def calculate_damage(self, attacker: Pokemon, defender: Pokemon, move: Move) -> int:
         """Calculate damage for a move."""
@@ -168,70 +196,132 @@ class Battle:
         
         return True
 
-    def execute_turn(self, player_move: Move, opponent_move: Move):
-        """Execute a single turn of battle."""
+    def execute_turn(self, player_action: tuple, opponent_action: tuple):
+        """Execute a single turn of battle.
+        
+        Args:
+            player_action: Tuple of (action_type, action_data)
+                action_type can be 'move' or 'switch'
+                action_data is either a Move object or a team index
+            opponent_action: Same format as player_action
+        """
         self.turn_count += 1
         print(f"\nTurn {self.turn_count}")
 
+        # Handle switching first
+        if player_action[0] == 'switch':
+            self.player_team.switch_pokemon(player_action[1])
+            print(f"Player switched to {self.player_team.active_pokemon.name}!")
+        
+        if opponent_action[0] == 'switch':
+            self.opponent_team.switch_pokemon(opponent_action[1])
+            print(f"Opponent switched to {self.opponent_team.active_pokemon.name}!")
+
+        # If both players switched, end turn
+        if player_action[0] == 'switch' and opponent_action[0] == 'switch':
+            return
+
         # Determine turn order based on speed
-        first = self.player_pokemon if self.player_pokemon.speed >= self.opponent_pokemon.speed else self.opponent_pokemon
-        second = self.opponent_pokemon if first == self.player_pokemon else self.player_pokemon
+        player_speed = self.player_team.active_pokemon.speed
+        opponent_speed = self.opponent_team.active_pokemon.speed
 
         # Execute moves in order
-        first_move = player_move if first == self.player_pokemon else opponent_move
-        second_move = opponent_move if first == self.player_pokemon else player_move
-
-        self.execute_move(first, second, first_move)
-        if not second.is_fainted():
-            self.execute_move(second, first, second_move)
+        if player_speed >= opponent_speed:
+            if player_action[0] == 'move':
+                self.execute_move(self.player_team.active_pokemon, 
+                                self.opponent_team.active_pokemon, 
+                                player_action[1])
+            if not self.opponent_team.active_pokemon.is_fainted() and opponent_action[0] == 'move':
+                self.execute_move(self.opponent_team.active_pokemon, 
+                                self.player_team.active_pokemon, 
+                                opponent_action[1])
+        else:
+            if opponent_action[0] == 'move':
+                self.execute_move(self.opponent_team.active_pokemon, 
+                                self.player_team.active_pokemon, 
+                                opponent_action[1])
+            if not self.player_team.active_pokemon.is_fainted() and player_action[0] == 'move':
+                self.execute_move(self.player_team.active_pokemon, 
+                                self.opponent_team.active_pokemon, 
+                                player_action[1])
 
     def is_battle_over(self) -> bool:
         """Check if the battle is over."""
-        return self.player_pokemon.is_fainted() or self.opponent_pokemon.is_fainted()
+        return self.player_team.is_defeated() or self.opponent_team.is_defeated()
 
-    def get_winner(self) -> Optional[Pokemon]:
+    def get_winner(self) -> Optional[Team]:
         """Get the winner of the battle, or None if the battle isn't over."""
         if not self.is_battle_over():
             return None
-        return self.opponent_pokemon if self.player_pokemon.is_fainted() else self.player_pokemon
+        return self.opponent_team if self.player_team.is_defeated() else self.player_team
 
 def main():
-    # Create Pokemon from the data
-    pokemon1 = Pokemon.from_data("calyrex-shadow")
-    pokemon2 = Pokemon.from_data("charizard")
+    # Create two teams of 6 Pokemon
+    player_pokemon = [
+        Pokemon.from_data("charizard"),
+        Pokemon.from_data("blastoise"),
+        Pokemon.from_data("venusaur"),
+        Pokemon.from_data("pikachu"),
+        Pokemon.from_data("snorlax"),
+        Pokemon.from_data("gyarados")
+    ]
     
-    # Print Pokemon information
+    opponent_pokemon = [
+        Pokemon.from_data("tyranitar"),
+        Pokemon.from_data("metagross"),
+        Pokemon.from_data("salamence"),
+        Pokemon.from_data("garchomp"),
+        Pokemon.from_data("dragonite"),
+        Pokemon.from_data("hydreigon")
+    ]
+    
+    player_team = Team(player_pokemon)
+    opponent_team = Team(opponent_pokemon)
+    
+    # Print team information
     print("Battle Start!")
-
-    print("\n")
-    print(pokemon1.name, ":")
-    print(f"Types: {', '.join(pokemon1.types)}")
-    print(f"Moves: {', '.join(move.name for move in pokemon1.moves)}")
-    print(f"HP: {pokemon1.hp}")
+    print("\nPlayer's Team:")
+    for i, pokemon in enumerate(player_team.pokemon):
+        print(f"{i+1}. {pokemon.name}")
+        print(f"   Types: {', '.join(pokemon.types)}")
+        print(f"   Moves: {', '.join(move.name for move in pokemon.moves)}")
+        print(f"   HP: {pokemon.hp}")
     
-    print("\n")
-    print(pokemon1.name, ":")
-    print(f"Types: {', '.join(pokemon2.types)}")
-    print(f"Moves: {', '.join(move.name for move in pokemon2.moves)}")
-    print(f"HP: {pokemon2.hp}")
+    print("\nOpponent's Team:")
+    for i, pokemon in enumerate(opponent_team.pokemon):
+        print(f"{i+1}. {pokemon.name}")
+        print(f"   Types: {', '.join(pokemon.types)}")
+        print(f"   Moves: {', '.join(move.name for move in pokemon.moves)}")
+        print(f"   HP: {pokemon.hp}")
     
     # Create and run a battle
-    battle = Battle(pokemon1, pokemon2)
+    battle = Battle(player_team, opponent_team)
     
     while not battle.is_battle_over():
-        player_move = battle.player_pokemon.moves[0]
-
-        opponent_move = random.choice(battle.opponent_pokemon.moves)
+        # For demonstration, we'll just use the first move of the active Pokemon
+        player_move = battle.player_team.active_pokemon.moves[0]
+        opponent_move = random.choice(battle.opponent_team.active_pokemon.moves)
         
-        battle.execute_turn(player_move, opponent_move)
+        # Randomly decide whether to switch or use a move
+        if random.random() < 0.2 and battle.player_team.get_available_switches():
+            player_action = ('switch', random.choice(battle.player_team.get_available_switches()))
+        else:
+            player_action = ('move', player_move)
+            
+        if random.random() < 0.2 and battle.opponent_team.get_available_switches():
+            opponent_action = ('switch', random.choice(battle.opponent_team.get_available_switches()))
+        else:
+            opponent_action = ('move', opponent_move)
         
-        # Print current HP
-        print("\n")
-        print(pokemon1.name, f" HP: {battle.player_pokemon.current_hp}/{battle.player_pokemon.hp}")
-        print(pokemon2.name, f" HP: {battle.opponent_pokemon.current_hp}/{battle.opponent_pokemon.hp}")
+        battle.execute_turn(player_action, opponent_action)
+        
+        # Print current HP of active Pokemon
+        print("\nCurrent Status:")
+        print(f"Player's {battle.player_team.active_pokemon.name}: {battle.player_team.active_pokemon.current_hp}/{battle.player_team.active_pokemon.hp} HP")
+        print(f"Opponent's {battle.opponent_team.active_pokemon.name}: {battle.opponent_team.active_pokemon.current_hp}/{battle.opponent_team.active_pokemon.hp} HP")
 
     winner = battle.get_winner()
-    print(f"\n{winner.name} wins the battle!")
+    print(f"\n{'Player' if winner == player_team else 'Opponent'} wins the battle!")
 
 if __name__ == "__main__":
     main() 
